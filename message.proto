@@ -1,0 +1,16 @@
+syntax = "proto3";
+package Chat;
+
+enum TYPE{
+    chatMessage_C_TO_S = 0;
+    chatMessage_S_TO_C = 1;
+}
+
+message ChatMessage_C_TO_S{
+    string msg = 1;
+}
+
+message ChatMessage_S_TO_C{
+    string time = 1;
+    string msg = 2;
+}
