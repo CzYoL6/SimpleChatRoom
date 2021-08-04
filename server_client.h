@@ -18,13 +18,17 @@ class ServerClient {
     int ReadFromRecvBuffer(char* buf, int size, bool peek) const;
     int WriteIntoRecvBuffer(char* buf, int size) const;
 
-    CircleBuffer<char>* GetSendBuffer() const { return m_sendBuffer; }
+    CircleBuffer<char>* GetSendBuffer() { return m_sendBuffer; }
 
-    CircleBuffer<char>* GetRecvBuffer() const { return m_recvBuffer; }
+    CircleBuffer<char>* GetRecvBuffer() { return m_recvBuffer; }
+
+    void SetNickname(std::string name);
+    std::string GetNickname();
 
    private:
     int m_nSockFd{-1};
     sockaddr m_sAddr;
     CircleBuffer<char>* m_sendBuffer{nullptr};
     CircleBuffer<char>* m_recvBuffer{nullptr};
+    std::string nickname;
 };

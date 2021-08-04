@@ -14,30 +14,31 @@ int main() {
 
     protoMsg.SerializeToArray(tmp, protoMsg.ByteSizeLong());
     packet->AddVal(tmp, protoMsg.ByteSizeLong());
-    packet->AddLength();
+    packet->InsertLengthInFront();
 
     std::cout << "packet length: " << packet->GetAllLength() << std::endl;
 
-    if (packet->GetBuffer()->GetLength() >= sizeof(unsigned int)) {
+    if (packet->GetCircleBuffer()->GetLength() >= sizeof(unsigned int)) {
         char tmp[1024];
         memset(tmp, 0, sizeof(tmp));
         int read_res =
-            packet->GetBuffer()->Read(tmp, sizeof(unsigned int), true);
+            packet->GetCircleBuffer()->Read(tmp, sizeof(unsigned int), true);
         unsigned int p_tmp_res = *(reinterpret_cast<unsigned int*>(tmp));
         std::cout << "read_res: " << read_res << " "
                   << " tmp_res: " << p_tmp_res << std::endl;
 
-        if (packet->GetBuffer()->GetLength() >=
+        if (packet->GetCircleBuffer()->GetLength() >=
             sizeof(unsigned int) + p_tmp_res) {
             memset(tmp, 0, sizeof(tmp));
-            packet->GetBuffer()->Read(tmp, sizeof(unsigned int));
+            packet->GetCircleBuffer()->Read(tmp, sizeof(unsigned int));
             memset(tmp, 0, sizeof(tmp));
-            packet->GetBuffer()->Read(tmp, sizeof(Chat::TYPE));
+            packet->GetCircleBuffer()->Read(tmp, sizeof(Chat::TYPE));
             std::cout << "type: " << *reinterpret_cast<Chat::TYPE*>(tmp)
                       << std::endl;
 
             memset(tmp, 0, sizeof(tmp));
-            packet->GetBuffer()->Read(tmp, p_tmp_res - sizeof(Chat::TYPE));
+            packet->GetCircleBuffer()->Read(tmp,
+                                            p_tmp_res - sizeof(Chat::TYPE));
             std::cout << p_tmp_res - sizeof(Chat::TYPE) << std::endl;
             Chat::ChatMessage_C_TO_S newMsg;
             if (newMsg.ParseFromArray(tmp, p_tmp_res - sizeof(Chat::TYPE)))

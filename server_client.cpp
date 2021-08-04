@@ -7,8 +7,8 @@
 ServerClient::ServerClient(int fd, sockaddr* addr) {
     m_nSockFd = fd;
     m_sAddr = *addr;
-    m_sendBuffer = new CircleBuffer<char>(2048);
-    m_recvBuffer = new CircleBuffer<char>(2048);
+    m_sendBuffer = new CircleBuffer<char>(1024);
+    m_recvBuffer = new CircleBuffer<char>(1024);
 }
 
 ServerClient::~ServerClient() {
@@ -48,4 +48,12 @@ int ServerClient::WriteIntoSendBuffer(char* buf, int size) const {
 
 int ServerClient::WriteIntoRecvBuffer(char* buf, int size) const {
     return m_recvBuffer->Write(buf, size);
+}
+
+void ServerClient::SetNickname(std::string name) {
+    nickname = name;
+}
+
+std::string ServerClient::GetNickname() {
+    return nickname;
 }

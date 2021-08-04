@@ -2,7 +2,7 @@
 
 Packet::Packet(Chat::TYPE type) {
     m_type = type;
-    m_buffer = new CircleBuffer<char>(2048);
+    m_buffer = new CircleBuffer<char>(1024);
     m_buffer->Write(reinterpret_cast<char*>(&type), sizeof(type));
 }
 
@@ -13,7 +13,7 @@ Packet::~Packet() {
     }
 }
 
-int Packet::AddLength() {
+int Packet::InsertLengthInFront() {
     int length = m_buffer->GetLength();
     CircleBuffer<char>* newBuffer = new CircleBuffer<char>(2048);
     newBuffer->Write(reinterpret_cast<char*>(&length), sizeof(length));
@@ -36,6 +36,6 @@ void Packet::ReadVal(char* val, int size, bool peek = false) {
     m_buffer->Read(val, size, peek);
 }
 
-CircleBuffer<char>* Packet::GetBuffer() const {
+CircleBuffer<char>* Packet::GetCircleBuffer() const {
     return m_buffer;
 }

@@ -19,10 +19,11 @@ class Server {
    public:
     Server();
     ~Server();
-    bool Start(std::string ip, int port);
+    void Start(std::string ip, int port);
     bool Update();
     void HandleData();
     bool IsRunning() const { return isRunning; }
+    ServerClient* GetClient(int fd);
 
    private:
     int epfd{-1};
@@ -31,4 +32,7 @@ class Server {
     std::shared_ptr<std::map<int, ServerClient*>> clients;
     int server_sock{-1};
     sockaddr_in server_addr;
+    int SetNonBlocking(int fd);
+    void SetReusable(int fd);
+    int Bind(std::string ip, int port);
 };

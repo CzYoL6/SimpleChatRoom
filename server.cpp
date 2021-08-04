@@ -2,28 +2,25 @@
 #include "server.h"
 #include "message.pb.h"
 #include "packet.h"
+#include "server_send.hpp"
 
 #define EPOLL_SIZE 50
 #define BUF_SIZE 1024
 
-int SetNonBlocking(int fd) {
+int Server::SetNonBlocking(int fd) {
     int flags = fcntl(fd, F_GETFL);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     return flags;
 }
 
-bool Server::Start(std::string ip, int port) {
-    clients.reset(new std::map<int, ServerClient*>);
-
-    server_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    assert(server_sock >= 0);
-    SetNonBlocking(server_sock);
-
+void Server::SetReusable(int fd) {
     int option = true;
     socklen_t optlen = sizeof(option);
-    setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR,
-               reinterpret_cast<void*>(&option), optlen);
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<void*>(&option),
+               optlen);
+}
 
+int Server::Bind(std::string ip, int port) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     inet_pton(AF_INET, ip.c_str(), &server_addr.sin_addr.s_addr);
@@ -33,11 +30,24 @@ bool Server::Start(std::string ip, int port) {
     addr_len = sizeof(server_addr);
     int ret =
         bind(server_sock, reinterpret_cast<sockaddr*>(&server_addr), addr_len);
-    assert(ret >= 0);
+    return ret;
+}
+
+void Server::Start(std::string ip, int port) {
+    clients.reset(new std::map<int, ServerClient*>);
+
+    server_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    assert(server_sock >= 0);
+    SetNonBlocking(server_sock);
+
+    SetReusable(server_sock);
+
+    int bind_ret = Bind(ip, port);
+    assert(bind_ret >= 0);
     std::cout << "bind() succeeded..." << std::endl;
 
-    ret = listen(server_sock, 5);
-    assert(ret >= 0);
+    int listen_ret = listen(server_sock, 5);
+    assert(listen_ret >= 0);
     std::cout << "listen() succeeded..." << std::endl;
 
     epfd = epoll_create(EPOLL_SIZE);
@@ -91,15 +101,15 @@ bool Server::Update() {
 
             ServerClient* new_cli = new ServerClient(
                 new_cli_sock, reinterpret_cast<sockaddr*>(&new_cli_addr));
-
             clients->insert(std::make_pair(new_cli_sock, new_cli));
-
             epoll_event ev;
             ev.data.fd = new_cli_sock;
             ev.events = EPOLLIN;
             epoll_ctl(epfd, EPOLL_CTL_ADD, new_cli_sock, &ev);
             std::cout << inet_ntoa(new_cli_addr.sin_addr) << " connected..."
                       << std::endl;
+            // std::cout << "fd: " << new_cli_sock << std::endl;
+            SERVER_SEND::Welcome(new_cli);
 
         } else {
             if (eve & EPOLLIN) {
@@ -138,16 +148,32 @@ bool Server::Update() {
             }
         }
         if (eve & EPOLLOUT) {
+            char tmp[1024];
+            memset(tmp, 0, sizeof(tmp));
+            int size = (*clients)[fd]->GetSendBuffer()->GetLength();
+            (*clients)[fd]->ReadFromSendBuffer(tmp, size, false);
+            send(fd, tmp, size, 0);
+
+            epoll_event ev;
+            ev.data.fd = fd;
+            ev.events = EPOLLIN;
+            epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev);
         }
     }
     return true;
 }
 
 void Server::HandleData() {
+    // std::cout << "clients size: " << clients->size() << std::endl;
     for (auto iter = clients->begin(); iter != clients->end(); iter++) {
         auto cli = iter->second;
+        // std::cout << "fd: " << iter->first << "!!!" << std::endl;
+        // assert(cli != nullptr);
+        // std::cout << "cli is not null" << std::endl;
+        // assert(cli->m_recvBuffer != nullptr);
+        // std::cout << "cli->mrecv is not null" << std::endl;
         if (cli->GetRecvBuffer()->GetLength() >= sizeof(unsigned int)) {
-            char tmp[4];
+            char tmp[1024];
             memset(tmp, 0, sizeof(tmp));
             int read_res =
                 cli->GetRecvBuffer()->Read(tmp, sizeof(unsigned int), true);
@@ -161,47 +187,69 @@ void Server::HandleData() {
                 cli->GetRecvBuffer()->Read(tmp, sizeof(unsigned int));
                 memset(tmp, 0, sizeof(tmp));
                 cli->GetRecvBuffer()->Read(tmp, sizeof(Chat::TYPE));
-                std::cout << "recv from client: " << tmp
-                          << "(size: " << p_tmp_res << ")" << std::endl;
-                std::cout << "type: " << *reinterpret_cast<Chat::TYPE*>(tmp)
-                          << std::endl;
-                memset(tmp, 0, sizeof(tmp));
-                cli->GetRecvBuffer()->Read(tmp, p_tmp_res - sizeof(Chat::TYPE));
-                std::cout << p_tmp_res - sizeof(Chat::TYPE) << std::endl;
-                Chat::ChatMessage_C_TO_S newMsg;
-                if (newMsg.ParseFromArray(tmp, p_tmp_res - sizeof(Chat::TYPE)))
-                    std::cout << "msg: " << newMsg.msg() << std::endl;
+                Chat::TYPE type = *(reinterpret_cast<Chat::TYPE*>(tmp));
 
-                //获取当前时间
-                //当前的时间点
-                std::chrono::system_clock::time_point tp =
-                    std::chrono::system_clock::now();
-                //转换为time_t类型
-                std::time_t t = std::chrono::system_clock::to_time_t(tp);
-                //转换为字符串
-                std::string now = ctime(&t);
-                //去除末尾的换行
-                now.resize(now.size() - 1);
+                switch (type) {
+                    case Chat::TYPE::chatMessage_C_TO_S: {
+                        memset(tmp, 0, sizeof(tmp));
+                        cli->GetRecvBuffer()->Read(
+                            tmp, p_tmp_res - sizeof(Chat::TYPE));
+                        Chat::ChatMessage_C_TO_S newMsg;
+                        if (!newMsg.ParseFromArray(
+                                tmp, p_tmp_res - sizeof(Chat::TYPE)))
+                            break;
+                        std::cout << "msg: " << newMsg.msg() << std::endl;
 
-                std::string res_(now);
-                res_.append(": ");
-                res_.append(newMsg.msg());
+                        //获取当前时间
+                        //当前的时间点
+                        std::chrono::system_clock::time_point tp =
+                            std::chrono::system_clock::now();
+                        //转换为time_t类型
+                        std::time_t t =
+                            std::chrono::system_clock::to_time_t(tp);
+                        //转换为字符串
+                        std::string now = ctime(&t);
+                        //去除末尾的换行
+                        now.resize(now.size() - 1);
 
-                Packet* packet = new Packet(Chat::TYPE::chatMessage_C_TO_S);
-                std::string msg(res_);
+                        Packet* packet =
+                            new Packet(Chat::TYPE::chatMessage_S_TO_C);
 
-                Chat::ChatMessage_C_TO_S protoMsg;
-                protoMsg.set_msg(res_);
-                char tmp[1024];
-                memset(tmp, 0, sizeof(tmp));
-                protoMsg.SerializeToArray(tmp, protoMsg.ByteSizeLong());
-                packet->AddVal(tmp, protoMsg.ByteSizeLong());
-                packet->AddLength();
+                        Chat::ChatMessage_S_TO_C protoMsg;
+                        protoMsg.set_msg(newMsg.msg());
+                        protoMsg.set_time(now);
+                        protoMsg.set_nickname(cli->GetNickname());
+                        char tmp[1024];
+                        memset(tmp, 0, sizeof(tmp));
+                        protoMsg.SerializeToArray(tmp, protoMsg.ByteSizeLong());
+                        packet->AddVal(tmp, protoMsg.ByteSizeLong());
+                        packet->InsertLengthInFront();
 
-                for (auto iter : *clients) {
-                    if (iter.first != cli->GetSockFd())
-                        send(iter.first, packet->GetBuffer()->GetBuffer(),
-                             packet->GetAllLength(), 0);
+                        for (auto iter : *clients) {
+                            if (iter.first != cli->GetSockFd())
+                                send(iter.first,
+                                     packet->GetCircleBuffer()->GetBuffer(),
+                                     packet->GetAllLength(), 0);
+                        }
+
+                        delete packet;
+                        break;
+                    }
+                    case Chat::TYPE::setNickName_C_TO_S: {
+                        memset(tmp, 0, sizeof(tmp));
+                        cli->GetRecvBuffer()->Read(
+                            tmp, p_tmp_res - sizeof(Chat::TYPE));
+                        Chat::SetNickName_C_TO_S newMsg;
+                        if (!newMsg.ParseFromArray(
+                                tmp, p_tmp_res - sizeof(Chat::TYPE)))
+                            break;
+                        std::cout << "new member nickname set to: "
+                                  << newMsg.nickname() << std::endl;
+                        cli->SetNickname(newMsg.nickname());
+
+                        SERVER_SEND::NicknameSet(cli);
+                        break;
+                    }
                 }
 
             } else {
@@ -214,3 +262,7 @@ void Server::HandleData() {
 Server::Server() {}
 
 Server::~Server() {}
+
+ServerClient* Server::GetClient(int fd) {
+    return (*clients)[fd];
+}

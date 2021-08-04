@@ -16,7 +16,10 @@
 #define EPOLL_SIZE 50
 #define BUF_SIZE 1024
 
+enum STATE { DEFAULT = 0, SET_NICKNAME = 1, CHAT = 2 } state;
+
 int main(int argc, char** argv) {
+    state = STATE::DEFAULT;
     int client_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     assert(client_sock >= 0);
     sockaddr_in server_addr;
@@ -39,6 +42,7 @@ int main(int argc, char** argv) {
             client_sock, reinterpret_cast<sockaddr*>(&server_addr), addr_len);
         if (connect_ret == 0) {
             std::cout << "connect() succeeded." << std::endl;
+
         } else if (connect_ret < 0) {
             std::cout << "connect() err. " << std::endl;
         }
@@ -137,30 +141,102 @@ int main(int argc, char** argv) {
                                     recvbuf.Read(tmp, sizeof(unsigned int));
                                     memset(tmp, 0, sizeof(tmp));
                                     recvbuf.Read(tmp, sizeof(Chat::TYPE));
-                                    // std::cout << "recv from server: " << tmp
-                                    //           << "(size: " << p_tmp_res <<
-                                    //           ")"
-                                    //           << std::endl;
-                                    // std::cout
-                                    //     << "type: "
-                                    //     <<
-                                    //     *reinterpret_cast<Chat::TYPE*>(tmp)
-                                    //     << std::endl;
-                                    memset(tmp, 0, sizeof(tmp));
-                                    recvbuf.Read(
-                                        tmp, p_tmp_res - sizeof(Chat::TYPE));
-                                    // std::cout << p_tmp_res -
-                                    // sizeof(Chat::TYPE)
-                                    //           << std::endl;
-                                    Chat::ChatMessage_C_TO_S newMsg;
-                                    if (newMsg.ParseFromArray(
-                                            tmp,
-                                            p_tmp_res - sizeof(Chat::TYPE)))
-                                        std::cout << "msg: " << newMsg.msg()
-                                                  << std::endl;
-                                    else {
-                                        std::cout << "parse failed."
-                                                  << std::endl;
+
+                                    Chat::TYPE type =
+                                        *(reinterpret_cast<Chat::TYPE*>(tmp));
+                                    switch (type) {
+                                        case Chat::TYPE::chatMessage_S_TO_C: {
+                                            std::cout << "type : "
+                                                         "Chat::TYPE::"
+                                                         "chatMessage_S_TO_C "
+                                                      << std::endl;
+                                            memset(tmp, 0, sizeof(tmp));
+                                            recvbuf.Read(
+                                                tmp,
+                                                p_tmp_res - sizeof(Chat::TYPE));
+                                            Chat::ChatMessage_S_TO_C newMsg;
+                                            if (newMsg.ParseFromArray(
+                                                    tmp,
+                                                    p_tmp_res -
+                                                        sizeof(Chat::TYPE)))
+                                                std::cout
+                                                    << "======================="
+                                                       "======================="
+                                                       "=========="
+                                                    << std::endl
+                                                    << "from: "
+                                                    << newMsg.nickname()
+                                                    << std::endl
+                                                    << "time: " << newMsg.time()
+                                                    << std::endl
+                                                    << "msg: " << newMsg.msg()
+                                                    << std::endl
+                                                    << "======================="
+                                                       "======================="
+                                                       "=========="
+                                                    << std::endl;
+                                            else {
+                                                std::cout << "parse failed."
+                                                          << std::endl;
+                                            }
+                                            break;
+                                        }
+                                        case Chat::TYPE::welcome_S_TO_C: {
+                                            std::cout
+                                                << "type : "
+                                                   "Chat::TYPE::welcome_S_TO_C "
+                                                << std::endl;
+                                            memset(tmp, 0, sizeof(tmp));
+                                            recvbuf.Read(
+                                                tmp,
+                                                p_tmp_res - sizeof(Chat::TYPE));
+                                            Chat::Welcome_S_TO_C newMsg;
+                                            if (newMsg.ParseFromArray(
+                                                    tmp,
+                                                    p_tmp_res -
+                                                        sizeof(Chat::TYPE))) {
+                                                std::cout
+                                                    << "welcome received..."
+                                                    << std::endl
+                                                    << "please input your "
+                                                       "nickname: "
+                                                    << std::flush;
+                                                ;
+                                                state = STATE::SET_NICKNAME;
+
+                                            } else {
+                                                std::cout << "parse failed."
+                                                          << std::endl;
+                                            }
+                                            break;
+                                        }
+                                        case Chat::TYPE::
+                                            nickNameBeenSet_S_TO_C: {
+                                            std::cout
+                                                << "type : "
+                                                   "Chat::TYPE::"
+                                                   "nickNameBeenSet_S_TO_C "
+                                                << std::endl;
+                                            memset(tmp, 0, sizeof(tmp));
+                                            recvbuf.Read(
+                                                tmp,
+                                                p_tmp_res - sizeof(Chat::TYPE));
+                                            Chat::NickName_Been_Set_S_TO_C
+                                                newMsg;
+                                            if (newMsg.ParseFromArray(
+                                                    tmp,
+                                                    p_tmp_res -
+                                                        sizeof(Chat::TYPE))) {
+                                                std::cout << "nickname set "
+                                                             "successfully.. "
+                                                          << std::endl;
+                                                state = STATE::CHAT;
+                                            } else {
+                                                std::cout << "parse failed."
+                                                          << std::endl;
+                                            }
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -176,20 +252,50 @@ int main(int argc, char** argv) {
                             isClientWorking = false;
                             return -1;
                         } else {
-                            Packet* packet =
-                                new Packet(Chat::TYPE::chatMessage_C_TO_S);
-                            std::string msg(buf);
-                            Chat::ChatMessage_C_TO_S protoMsg;
-                            protoMsg.set_msg(msg);
-                            char tmp[1024];
-                            memset(tmp, 0, sizeof(tmp));
-                            protoMsg.SerializeToArray(tmp,
-                                                      protoMsg.ByteSizeLong());
-                            packet->AddVal(tmp, protoMsg.ByteSizeLong());
-                            packet->AddLength();
+                            Packet* packet;
 
-                            send(client_sock, packet->GetBuffer()->GetBuffer(),
-                                 packet->GetAllLength(), 0);
+                            switch (state) {
+                                case STATE::DEFAULT:
+                                    break;
+                                case STATE::SET_NICKNAME: {
+                                    packet = new Packet(
+                                        Chat::TYPE::setNickName_C_TO_S);
+                                    std::string msg(buf);
+                                    Chat::SetNickName_C_TO_S protoMsg;
+                                    protoMsg.set_nickname(msg);
+                                    char tmp[1024];
+                                    memset(tmp, 0, sizeof(tmp));
+                                    protoMsg.SerializeToArray(
+                                        tmp, protoMsg.ByteSizeLong());
+                                    packet->AddVal(tmp,
+                                                   protoMsg.ByteSizeLong());
+                                    packet->InsertLengthInFront();
+
+                                    send(client_sock,
+                                         packet->GetCircleBuffer()->GetBuffer(),
+                                         packet->GetAllLength(), 0);
+                                    break;
+                                }
+                                case STATE::CHAT: {
+                                    packet = new Packet(
+                                        Chat::TYPE::chatMessage_C_TO_S);
+                                    std::string msg(buf);
+                                    Chat::ChatMessage_C_TO_S protoMsg;
+                                    protoMsg.set_msg(msg);
+                                    char tmp[1024];
+                                    memset(tmp, 0, sizeof(tmp));
+                                    protoMsg.SerializeToArray(
+                                        tmp, protoMsg.ByteSizeLong());
+                                    packet->AddVal(tmp,
+                                                   protoMsg.ByteSizeLong());
+                                    packet->InsertLengthInFront();
+
+                                    send(client_sock,
+                                         packet->GetCircleBuffer()->GetBuffer(),
+                                         packet->GetAllLength(), 0);
+                                    break;
+                                }
+                            }
 
                             // std::cout
                             //     << "packet length: " <<
@@ -207,34 +313,35 @@ int main(int argc, char** argv) {
                         }
                     }
                 }
-                if (eve & EPOLLOUT) {
-                    // socket可写
+                // if (eve & EPOLLOUT) {
+                //     // socket可写
 
-                    Packet* packet = new Packet(Chat::TYPE::chatMessage_C_TO_S);
-                    std::string msg{"hello there!"};
-                    Chat::ChatMessage_C_TO_S protoMsg;
-                    protoMsg.set_msg(msg);
-                    char tmp[1024];
-                    memset(tmp, 0, sizeof(tmp));
-                    protoMsg.SerializeToArray(tmp, protoMsg.ByteSizeLong());
-                    packet->AddVal(tmp, protoMsg.ByteSizeLong());
-                    packet->AddLength();
+                //     Packet* packet = new
+                //     Packet(Chat::TYPE::chatMessage_C_TO_S); std::string
+                //     msg{"hello there!"}; Chat::ChatMessage_C_TO_S protoMsg;
+                //     protoMsg.set_msg(msg);
+                //     char tmp[1024];
+                //     memset(tmp, 0, sizeof(tmp));
+                //     protoMsg.SerializeToArray(tmp, protoMsg.ByteSizeLong());
+                //     packet->AddVal(tmp, protoMsg.ByteSizeLong());
+                //     packet->InsertLengthInFront();
 
-                    send(fd, packet->GetBuffer()->GetBuffer(),
-                         packet->GetAllLength(), 0);
+                //     send(fd, packet->GetCircleBuffer()->GetBuffer(),
+                //          packet->GetAllLength(), 0);
 
-                    // std::cout << "packet length: " << packet->GetAllLength()
-                    //           << std::endl;
+                //     // std::cout << "packet length: " <<
+                //     packet->GetAllLength()
+                //     //           << std::endl;
 
-                    // std::cout << "send() suceeded." << std::endl;
-                    epoll_event ev;
-                    ev.data.fd = fd;
-                    ev.events = EPOLLIN;
-                    epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev);
+                //     // std::cout << "send() suceeded." << std::endl;
+                //     epoll_event ev;
+                //     ev.data.fd = fd;
+                //     ev.events = EPOLLIN;
+                //     epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev);
 
-                    delete packet;
-                    packet = nullptr;
-                }
+                //     delete packet;
+                //     packet = nullptr;
+                // }
             }
         }
     }
